@@ -13,13 +13,27 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
     
-    - name: Deploy to Pi via Cloudflare Tunnel
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.PI_HOST }}
-        username: ${{ secrets.PI_USERNAME }}
-        key: ${{ secrets.PI_SSH_KEY }}
-        script: |
+    - name: Install cloudflared
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+        sudo dpkg -i cloudflared-linux-amd64.deb
+    
+    - name: Setup SSH config for Cloudflare Tunnel
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.PI_SSH_KEY }}" > ~/.ssh/pi_key
+        chmod 600 ~/.ssh/pi_key
+        cat >> ~/.ssh/config << EOF
+        Host pilab
+          HostName ${{ secrets.PI_HOST }}
+          User ${{ secrets.PI_USERNAME }}
+          IdentityFile ~/.ssh/pi_key
+          ProxyCommand cloudflared access ssh --hostname %h
+        EOF
+    
+    - name: Deploy to Pi
+      run: |
+        ssh -o StrictHostKeyChecking=no pilab << 'ENDSSH'
           echo "🚀 Starting deployment of Gretchen..."
           
           DEPLOY_DIR="/tmp/gretchen-deploy-$(date +%s)"
@@ -58,6 +72,9 @@ jobs:
           
           sudo chown -R pluribus:pluribus /home/pluribus/plures/gretchen/
           
+          sudo mkdir -p /home/pluribus/plures/gretchen/data
+          sudo chown -R pluribus:pluribus /home/pluribus/plures/gretchen/data
+          
           echo "📦 Setting up virtual environment..."
           if [ ! -d "/home/pluribus/plures/gretchen/venv" ]; then
             sudo -u pluribus python3 -m venv /home/pluribus/plures/gretchen/venv
@@ -88,3 +105,4 @@ jobs:
           sudo rm -rf /home/pluribus/plures/gretchen.backup
           
           echo "🎉 Deployment complete!"
+        ENDSSH
