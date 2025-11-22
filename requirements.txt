@@ -1,0 +1,16 @@
+# Discord bot dependencies
+discord.py>=2.3.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Standard library modules used (no installation needed):
+# - asyncio
+# - json
+# - logging
+# - os
+# - random
+# - traceback
+# - datetime
+# - typing
+# - zoneinfo (Python 3.9+)
