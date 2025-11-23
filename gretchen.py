@@ -2,10 +2,13 @@ import os
 import logging
 import discord
 import asyncio
-from discord import app_commands
+import traceback
 from discord.ext import commands
+import setproctitle
 
 from config import LOG_FILE, LOG_LEVEL, BOT_TOKEN
+
+setproctitle.setproctitle('gretchen')
 
 # Set up logger
 logging.basicConfig(
@@ -42,7 +45,6 @@ async def on_error(event_method, *args, **kwargs):
 async def run_bot():
 	await bot.load_extension('cogs.confession')
 	await bot.load_extension('bot_status')
-	logging.info(BOT_TOKEN)
 	await bot.start(BOT_TOKEN)
 
 print(BOT_TOKEN)

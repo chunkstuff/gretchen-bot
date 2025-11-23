@@ -9,8 +9,11 @@ class BotStatus(commands.Cog):
 	@commands.Cog.listener()
 	async def on_ready(self):
 		try:
-			activity = discord.Activity(type=discord.ActivityType.listening, name='my hair 💁🏻‍♀️')
-			await self.bot.change_presence(activity=activity)
+			await self.bot.change_presence(
+				activity=discord.CustomActivity(
+					name="💁‍♀️ It's full of secrets 😏"
+				)
+			)
 		except Exception as e:
 			print(f'Error! {e}')
 # Setup the Cog
