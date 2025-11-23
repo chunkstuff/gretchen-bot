@@ -13,7 +13,6 @@ logging.basicConfig(
 	format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 	handlers=[
 		logging.FileHandler(LOG_FILE),
-		logging.StreamHandler()
 	]
 )
 logger = logging.getLogger("GretchenBot")
