@@ -62,7 +62,8 @@ jobs:
             --exclude='*.log' \
             --exclude='README.md' \
             --exclude='venv' \
-            --exclude='data' \
+            --exclude='data/confession_data.json' \
+            --exclude='data/processed_confessions.json' \
             $DEPLOY_DIR/ \
             /home/pluribus/plures/gretchen/
           
