@@ -102,7 +102,7 @@ jobs:
             exit 1
           fi
           
-          rm -rf $DEPLOY_DIR
+          sudo rm -rf $DEPLOY_DIR
           sudo rm -rf /home/pluribus/plures/gretchen.backup
           
           echo "🎉 Deployment complete!"
@@ -114,32 +114,33 @@ jobs:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
       run: |
         curl -H "Content-Type: application/json" \
-             -d '{
-               "embeds": [{
-                 "title": "🚀 Gretchen Deployed",
-                 "description": "Successfully deployed to PiLab",
-                 "color": 5763719,
-                 "fields": [
-                   {
-                     "name": "Commit",
-                     "value": "'"${{ github.event.head_commit.message }}"'",
-                     "inline": false
-                   },
-                   {
-                     "name": "Branch",
-                     "value": "'"${{ github.ref_name }}"'",
-                     "inline": true
-                   },
-                   {
-                     "name": "Deployed by",
-                     "value": "'"${{ github.actor }}"'",
-                     "inline": true
-                   }
-                 ],
-                 "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'"
-               }]
-             }' \
-             $DISCORD_WEBHOOK
+             -X POST \
+             -d @- "$DISCORD_WEBHOOK" <<EOF
+        {
+          "embeds": [{
+            "title": "🚀 Gretchen Deployed",
+            "description": "Successfully deployed to PiLab",
+            "color": 5763719,
+            "fields": [
+              {
+                "name": "Commit",
+                "value": "${{ github.event.head_commit.message }}",
+                "inline": false
+              },
+              {
+                "name": "Branch",
+                "value": "${{ github.ref_name }}",
+                "inline": true
+              },
+              {
+                "name": "Deployed by",
+                "value": "${{ github.actor }}",
+                "inline": true
+              }
+            ]
+          }]
+        }
+        EOF
     
     - name: Notify Discord on Failure
       if: failure()
@@ -147,29 +148,30 @@ jobs:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
       run: |
         curl -H "Content-Type: application/json" \
-             -d '{
-               "embeds": [{
-                 "title": "❌ Gretchen Deployment Failed",
-                 "description": "Deployment to PiLab failed",
-                 "color": 15158332,
-                 "fields": [
-                   {
-                     "name": "Commit",
-                     "value": "'"${{ github.event.head_commit.message }}"'",
-                     "inline": false
-                   },
-                   {
-                     "name": "Branch",
-                     "value": "'"${{ github.ref_name }}"'",
-                     "inline": true
-                   },
-                   {
-                     "name": "Check logs",
-                     "value": "'"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"'",
-                     "inline": false
-                   }
-                 ],
-                 "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"'"
-               }]
-             }' \
-             $DISCORD_WEBHOOK
+             -X POST \
+             -d @- "$DISCORD_WEBHOOK" <<EOF
+        {
+          "embeds": [{
+            "title": "❌ Gretchen Deployment Failed",
+            "description": "Deployment to PiLab failed",
+            "color": 15158332,
+            "fields": [
+              {
+                "name": "Commit",
+                "value": "${{ github.event.head_commit.message }}",
+                "inline": false
+              },
+              {
+                "name": "Branch",
+                "value": "${{ github.ref_name }}",
+                "inline": true
+              },
+              {
+                "name": "Check logs",
+                "value": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                "inline": false
+              }
+            ]
+          }]
+        }
+        EOF
