@@ -8,16 +8,16 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
-    
+
     - name: Install cloudflared
       run: |
         wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
         sudo dpkg -i cloudflared-linux-amd64.deb
-    
+
     - name: Setup SSH config for Cloudflare Tunnel
       run: |
         mkdir -p ~/.ssh
@@ -30,28 +30,28 @@ jobs:
           IdentityFile ~/.ssh/pi_key
           ProxyCommand cloudflared access ssh --hostname %h
         EOF
-    
+
     - name: Deploy to Pi
       run: |
         ssh -o StrictHostKeyChecking=no pilab << 'ENDSSH'
           echo "🚀 Starting deployment of Gretchen..."
-          
+
           DEPLOY_DIR="/tmp/gretchen-deploy-$(date +%s)"
           mkdir -p $DEPLOY_DIR
           sudo chown pluribus:pluribus $DEPLOY_DIR
           cd $DEPLOY_DIR
-          
+
           echo "📥 Cloning repository..."
           sudo -u pluribus bash -c "cd $DEPLOY_DIR && GIT_SSH_COMMAND='ssh -i /home/pluribus/.ssh/github_deploy -o StrictHostKeyChecking=no' git clone git@github.com:${{ github.repository }}.git ."
           sudo mkdir -p /home/pluribus/plures/gretchen
-          
+
           echo "🛑 Stopping bot..."
           sudo systemctl stop gretchen.service 2>/dev/null || true
-          
+
           if [ -d "/home/pluribus/plures/gretchen" ]; then
             sudo cp -r /home/pluribus/plures/gretchen /home/pluribus/plures/gretchen.backup
           fi
-          
+
           echo "📋 Deploying code..."
           sudo rsync -av --delete \
             --exclude='.git' \
@@ -66,27 +66,27 @@ jobs:
             --exclude='data/processed_confessions.json' \
             $DEPLOY_DIR/ \
             /home/pluribus/plures/gretchen/
-          
+
           if [ -f "/home/pluribus/plures/gretchen.backup/.env" ]; then
             sudo cp /home/pluribus/plures/gretchen.backup/.env /home/pluribus/plures/gretchen/.env
           fi
-          
+
           sudo chown -R pluribus:pluribus /home/pluribus/plures/gretchen/
-          
+
           sudo mkdir -p /home/pluribus/plures/gretchen/data
           sudo chown -R pluribus:pluribus /home/pluribus/plures/gretchen/data
-          
+
           echo "📦 Setting up virtual environment..."
           if [ ! -d "/home/pluribus/plures/gretchen/venv" ]; then
             sudo -u pluribus python3 -m venv /home/pluribus/plures/gretchen/venv
           fi
-          
+
           sudo -u pluribus /home/pluribus/plures/gretchen/venv/bin/pip install --upgrade pip
           sudo -u pluribus /home/pluribus/plures/gretchen/venv/bin/pip install -r /home/pluribus/plures/gretchen/requirements.txt
-          
+
           echo "▶️  Starting bot..."
           sudo systemctl start gretchen.service
-          
+
           sleep 3
           if sudo systemctl is-active --quiet gretchen.service; then
             echo "✅ Gretchen deployed successfully!"
@@ -101,77 +101,100 @@ jobs:
             fi
             exit 1
           fi
-          
+
           sudo rm -rf $DEPLOY_DIR
           sudo rm -rf /home/pluribus/plures/gretchen.backup
-          
+
           echo "🎉 Deployment complete!"
         ENDSSH
-    
+
     - name: Notify Discord on Success
       if: success()
       env:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
       run: |
-        curl -H "Content-Type: application/json" \
-             -X POST \
-             -d @- "$DISCORD_WEBHOOK" <<EOF
-        {
-          "embeds": [{
-            "title": "🚀 Gretchen Deployed",
-            "description": "Successfully deployed to PiLab",
-            "color": 5763719,
-            "fields": [
-              {
-                "name": "Commit",
-                "value": "${{ github.event.head_commit.message }}",
-                "inline": false
-              },
-              {
-                "name": "Branch",
-                "value": "${{ github.ref_name }}",
-                "inline": true
-              },
-              {
-                "name": "Deployed by",
-                "value": "${{ github.actor }}",
-                "inline": true
-              }
-            ]
+        # Split commit message into chunks for Discord fields (1024 char limit per field)
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+        # Create JSON fields array
+        FIELDS='[]'
+        FIELDS=$(echo "$FIELDS" | jq --arg branch "${{ github.ref_name }}" --arg actor "${{ github.actor }}" '. + [
+          {"name": "Branch", "value": $branch, "inline": true},
+          {"name": "Deployed by", "value": $actor, "inline": true}
+        ]')
+
+        # Split commit message into 1000 char chunks and add as fields
+        CHUNK_SIZE=1000
+        PART=1
+        while [ -n "$COMMIT_MSG" ]; do
+          CHUNK="${COMMIT_MSG:0:$CHUNK_SIZE}"
+          COMMIT_MSG="${COMMIT_MSG:$CHUNK_SIZE}"
+
+          if [ $PART -eq 1 ]; then
+            FIELD_NAME="📝 Commit Message"
+          else
+            FIELD_NAME="📝 Commit Message (cont.)"
+          fi
+
+          FIELDS=$(echo "$FIELDS" | jq --arg name "$FIELD_NAME" --arg value "$CHUNK" \
+            '. = [{name: $name, value: $value, inline: false}] + .')
+
+          PART=$((PART + 1))
+        done
+
+        # Build and send embed
+        jq -n --argjson fields "$FIELDS" '{
+          embeds: [{
+            title: "🚀 Gretchen Deployed",
+            description: "Successfully deployed to PiLab",
+            color: 5763719,
+            fields: $fields,
+            timestamp: (now | strftime("%Y-%m-%dT%H:%M:%S.000Z"))
           }]
-        }
-        EOF
-    
+        }' | curl -H "Content-Type: application/json" -X POST -d @- "$DISCORD_WEBHOOK"
+
     - name: Notify Discord on Failure
       if: failure()
       env:
         DISCORD_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
       run: |
-        curl -H "Content-Type: application/json" \
-             -X POST \
-             -d @- "$DISCORD_WEBHOOK" <<EOF
-        {
-          "embeds": [{
-            "title": "❌ Gretchen Deployment Failed",
-            "description": "Deployment to PiLab failed",
-            "color": 15158332,
-            "fields": [
-              {
-                "name": "Commit",
-                "value": "${{ github.event.head_commit.message }}",
-                "inline": false
-              },
-              {
-                "name": "Branch",
-                "value": "${{ github.ref_name }}",
-                "inline": true
-              },
-              {
-                "name": "Check logs",
-                "value": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-                "inline": false
-              }
-            ]
+        # Split commit message into chunks for Discord fields (1024 char limit per field)
+        COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+        # Create JSON fields array
+        FIELDS='[]'
+        FIELDS=$(echo "$FIELDS" | jq --arg branch "${{ github.ref_name }}" \
+          --arg logs "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" '. + [
+          {"name": "Branch", "value": $branch, "inline": true},
+          {"name": "Check logs", "value": $logs, "inline": false}
+        ]')
+
+        # Split commit message into 1000 char chunks and add as fields
+        CHUNK_SIZE=1000
+        PART=1
+        while [ -n "$COMMIT_MSG" ]; do
+          CHUNK="${COMMIT_MSG:0:$CHUNK_SIZE}"
+          COMMIT_MSG="${COMMIT_MSG:$CHUNK_SIZE}"
+
+          if [ $PART -eq 1 ]; then
+            FIELD_NAME="📝 Commit Message"
+          else
+            FIELD_NAME="📝 Commit Message (cont.)"
+          fi
+
+          FIELDS=$(echo "$FIELDS" | jq --arg name "$FIELD_NAME" --arg value "$CHUNK" \
+            '. = [{name: $name, value: $value, inline: false}] + .')
+
+          PART=$((PART + 1))
+        done
+
+        # Build and send embed
+        jq -n --argjson fields "$FIELDS" '{
+          embeds: [{
+            title: "❌ Gretchen Deployment Failed",
+            description: "Deployment to PiLab failed",
+            color: 15158332,
+            fields: $fields,
+            timestamp: (now | strftime("%Y-%m-%dT%H:%M:%S.000Z"))
           }]
-        }
-        EOF
+        }' | curl -H "Content-Type: application/json" -X POST -d @- "$DISCORD_WEBHOOK"
