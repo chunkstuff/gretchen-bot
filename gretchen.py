@@ -1,16 +1,23 @@
-import os
+"""
+Gretchen - Discord Confession Bot
+
+A Discord bot that handles anonymous confessions for The Cult of Sir.
+Confessions are submitted anonymously, moderated, and posted on a schedule.
+"""
 import logging
-import discord
 import asyncio
 import traceback
+
+import discord
 from discord.ext import commands
 import setproctitle
 
 from config import LOG_FILE, LOG_LEVEL, BOT_TOKEN
 
+# Set process title for system monitoring
 setproctitle.setproctitle('gretchen')
 
-# Set up logger
+# Configure logging
 logging.basicConfig(
 	level=LOG_LEVEL,
 	format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -20,32 +27,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger("GretchenBot")
 
-
-# Bot token and intents
+# Configure bot intents
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True	# For slash commands and guild interactions
+intents.guilds = True
 
+# Initialize bot
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 
 @bot.event
 async def on_ready():
-	print("Bot is ready")
+	"""Handle bot ready event and sync application commands."""
+	logger.info("Bot is ready")
 	try:
 		await bot.tree.sync()
-		print("Application commands synced successfully")
+		logger.info("Application commands synced successfully")
 	except Exception as e:
-		print(f"Failed to sync commands: {e}")
+		logger.error("Failed to sync commands: %s", e)
+
 
 @bot.event
-async def on_error(event_method, *args, **kwargs):
-	print(f"Error in {event_method}:")
+async def on_error(event_method):
+	"""
+	Handle errors in event methods.
+
+	Args:
+		event_method: The name of the event that raised an error
+		*args: Positional arguments passed to the event
+		**kwargs: Keyword arguments passed to the event
+	"""
+	logger.error("Error in %s:", event_method)
 	traceback.print_exc()
 
-async def run_bot():
-	await bot.load_extension('cogs.confession')
-	await bot.load_extension('bot_status')
-	await bot.start(BOT_TOKEN)
 
-print(BOT_TOKEN)
-asyncio.run(run_bot())
+async def run_bot():
+	"""Load extensions and start the bot."""
+	try:
+		await bot.load_extension('cogs.confession')
+		await bot.load_extension('bot_status')
+		logger.info("Extensions loaded successfully")
+		await bot.start(BOT_TOKEN)
+	except Exception as e:
+		logger.error("Failed to start bot: %s", e, exc_info=True)
+
+
+if __name__ == "__main__":
+	logger.info("Starting Gretchen bot...")
+	asyncio.run(run_bot())

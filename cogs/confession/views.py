@@ -7,13 +7,25 @@ from datetime import datetime
 import discord
 from discord.ui import View, Button, Modal, TextInput
 
+from .embeds import (
+	create_approval_embed,
+	create_rejection_embed,
+	create_submission_embed
+)
+
 logger = logging.getLogger(__name__)
 
 
 class ConfessionModal(Modal):
 	"""Modal for submitting a confession."""
-	
+
 	def __init__(self, cog):
+		"""
+		Initialize the confession modal.
+
+		Args:
+			cog: The ConfessionCog instance
+		"""
 		super().__init__(title="You let it out, honey!")
 		self.cog = cog
 		self.add_item(
@@ -26,9 +38,14 @@ class ConfessionModal(Modal):
 		)
 
 	async def on_submit(self, interaction: discord.Interaction):
+		"""
+		Handle confession submission.
+
+		Args:
+			interaction: The Discord interaction from the modal submission
+		"""
 		try:
 			full_text = self.children[0].value
-			truncated_text = (full_text[:147] + '...') if len(full_text) > 150 else full_text
 
 			# Create a confession with default "submitted" status
 			confession = {
@@ -44,40 +61,72 @@ class ConfessionModal(Modal):
 
 			# Add the confession to the submission queue
 			self.cog.data.add_submission(confession)
-			logger.info(f"Confession #{confession['id']} added to submission queue by {interaction.user.display_name}")
+			logger.info(
+				"Confession #%s added to submission queue by %s",
+				confession['id'],
+				interaction.user.display_name
+			)
 
 			# Send a notification to the moderation channel
-			mod_channel = self.cog.bot.get_channel(self.cog.moderator_channel_id)
+			mod_channel = self.cog.bot.get_channel(
+				self.cog.moderator_channel_id
+			)
 			if mod_channel:
-				embed = discord.Embed(
-					title=f"New Confession Submitted (#{confession['id']})",
-					description=truncated_text,
-					color=discord.Color.yellow(),
-				)
-				mod_message = await mod_channel.send(embed=embed, view=ConfessionNotificationView(self.cog, confession))
+				embed = create_submission_embed(confession)
+				view = ConfessionNotificationView(self.cog, confession)
+				mod_message = await mod_channel.send(embed=embed, view=view)
+
 				confession["message_id"] = mod_message.id
 				self.cog.data.save()
-				logger.info(f"Confession #{confession['id']} sent to moderation channel with message ID {mod_message.id}")
+				logger.info(
+					"Confession #%s sent to moderation channel with message ID %s",
+					confession['id'],
+					mod_message.id
+				)
 
 			# Acknowledge submission to the user
-			await interaction.response.send_message("Don't worry, honey, your secret is safe with me! ✨👀", ephemeral=True)
-			logger.info(f"User {interaction.user.display_name} successfully submitted confession #{confession['id']}")
+			await interaction.response.send_message(
+				"Don't worry, honey, your secret is safe with me! ✨👀",
+				ephemeral=True
+			)
+			logger.info(
+				"User %s successfully submitted confession #%s",
+				interaction.user.display_name,
+				confession['id']
+			)
+
 		except Exception as e:
-			logger.error(f"Error during confession submission: {e}", exc_info=True)
-			await interaction.response.send_message("Oops! Something went wrong. Please try again later. 💔", ephemeral=True)
+			logger.error("Error during confession submission: %s", e, exc_info=True)
+			await interaction.response.send_message(
+				"Oops! Something went wrong. Please try again later. 💔",
+				ephemeral=True
+			)
 
 
 class ConfessionNotificationView(View):
 	"""View for moderator actions on submitted confessions."""
-	
+
 	def __init__(self, cog, confession):
+		"""
+		Initialize the moderation view.
+
+		Args:
+			cog: The ConfessionCog instance
+			confession: The confession dict being moderated
+		"""
 		super().__init__(timeout=None)
 		self.cog = cog
 		self.confession = confession
-		self.show_full_message = False
 
 	@discord.ui.button(label="Approve ✅", style=discord.ButtonStyle.success)
 	async def approve_button(self, interaction: discord.Interaction, button: Button):
+		"""
+		Handle confession approval.
+
+		Args:
+			interaction: The Discord interaction from button click
+			button: The button that was clicked
+		"""
 		confession = self.confession
 		self.cog.data.remove_submission(confession)
 		confession["status"] = "approved"
@@ -87,80 +136,89 @@ class ConfessionNotificationView(View):
 		confession["scheduled_time"] = next_2am.isoformat()
 
 		self.cog.data.add_to_post_queue(confession)
-		
+
 		# Schedule the confession to be posted at the designated time
 		self.cog.service.schedule_confession_post(confession)
 
 		# Format the time nicely for display
-		scheduled_time_str = next_2am.strftime("%Y-%m-%d at 2:00 AM UK time")
+		scheduled_time_str = next_2am.strftime("%Y-%m-%d at %I:%M %p UK time")
 
+		# Update the original embed
 		embed = interaction.message.embeds[0]
 		embed.color = discord.Color.green()
 		embed.title = f"Confession #{confession['id']} (Approved)"
-		embed.set_footer(
-			text=f"Submitted by: {confession['username']} | Submitted on: {confession['submission_time']}"
-		)
 		await interaction.message.edit(embed=embed, view=None)
-		await interaction.response.send_message(
-			f"Confession #{confession['id']} approved and scheduled for {scheduled_time_str}.", 
-			ephemeral=True
+
+		# Send approval notification embed
+		approval_embed = create_approval_embed(
+			confession,
+			interaction.user,
+			scheduled_time_str
 		)
+		await interaction.response.send_message(embed=approval_embed)
 
 	@discord.ui.button(label="Reject ❌", style=discord.ButtonStyle.danger)
 	async def reject_button(self, interaction: discord.Interaction, button: Button):
+		"""
+		Handle confession rejection.
+
+		Args:
+			interaction: The Discord interaction from button click
+			button: The button that was clicked
+		"""
 		confession = self.confession
 		self.cog.data.remove_submission(confession)
 		confession["status"] = "rejected"
-		
+
 		# Archive rejected confession
 		self.cog.data.archive(confession)
 
+		# Update the original embed
 		embed = interaction.message.embeds[0]
 		embed.color = discord.Color.red()
 		embed.title = f"Confession #{confession['id']} (Rejected)"
-		embed.set_footer(
-			text=f"Submitted by: {confession['username']} | Submitted on: {confession['submission_time']}"
-		)
 		await interaction.message.edit(embed=embed, view=None)
-		await interaction.response.send_message(
-			f"Confession #{confession['id']} rejected.",
-			ephemeral=True
-		)
 
-	@discord.ui.button(label="Toggle Message 📝", style=discord.ButtonStyle.secondary)
-	async def toggle_message_button(self, interaction: discord.Interaction, button: Button):
-		self.show_full_message = not self.show_full_message
-		embed = interaction.message.embeds[0]
-
-		if self.show_full_message:
-			embed.description = f"**Full Message:**\n```\n{self.confession['text']}\n```"
-			button.label = "Show Shortened Message 📝"
-		else:
-			truncated_text = self.confession["text"][:147] + "..." if len(self.confession["text"]) > 150 else self.confession["text"]
-			embed.description = f"**Truncated Message:**\n\n{truncated_text}\n"
-			button.label = "Show Full Message 📝"
-
-		embed.set_footer(
-			text=f"Submitted by: {self.confession['username']} | Submitted on: {self.confession['submission_time']}"
-		)
-		await interaction.message.edit(embed=embed, view=self)
-		await interaction.response.send_message("Message toggled.", ephemeral=True)
+		# Send rejection notification embed
+		rejection_embed = create_rejection_embed(confession, interaction.user)
+		await interaction.response.send_message(embed=rejection_embed)
 
 
 class PersistentView(View):
 	"""Persistent view with the main confession button."""
-	
+
 	def __init__(self, cog):
+		"""
+		Initialize the persistent view.
+
+		Args:
+			cog: The ConfessionCog instance
+		"""
 		super().__init__(timeout=None)
 		self.add_item(ConfessionButton(cog))
 
 
 class ConfessionButton(Button):
 	"""Main button for submitting confessions."""
-	
+
 	def __init__(self, cog):
-		super().__init__(label="🤭 Add to my hair!", style=discord.ButtonStyle.danger)
+		"""
+		Initialize the confession button.
+
+		Args:
+			cog: The ConfessionCog instance
+		"""
+		super().__init__(
+			label="🤭 Add to my hair!",
+			style=discord.ButtonStyle.danger
+		)
 		self.cog = cog
 
 	async def callback(self, interaction: discord.Interaction):
-		await self.cog.open_modal(interaction)
+		"""
+		Handle button click to open confession modal.
+
+		Args:
+			interaction: The Discord interaction from button click
+		"""
+		await interaction.response.send_modal(ConfessionModal(self.cog))
