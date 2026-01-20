@@ -94,29 +94,36 @@ def _set_moderator_footer(embed, moderator, action):
 	)
 
 
-def create_approval_embed(confession, moderator, scheduled_time_str):
+def create_approval_embed(confession, moderator, posting_time, queue_position):
 	"""
 	Create the approval notification embed.
 
 	Args:
 		confession: The confession dict that was approved
 		moderator: The Discord user who approved it
-		scheduled_time_str: Formatted string of scheduled posting time
+		posting_time: Formatted string of when it will post
+		queue_position: Position in the posting queue
 
 	Returns:
 		discord.Embed: Approval notification embed
 	"""
 	embed = _create_base_moderation_embed(
 		title="✅ Confession Approved",
-		description="Confession **#{id}** has been approved and is ready to be posted.",
+		description="Confession **#{id}** has been approved and added to the posting queue.",
 		color=EmbedColors.SUCCESS,
 		confession=confession
 	)
 
 	embed.add_field(
-		name="📅 Scheduled Time",
-		value=f"```\n{scheduled_time_str}\n```",
+		name="📅 Will post",
+		value=posting_time,
 		inline=False
+	)
+
+	embed.add_field(
+		name="📊 Queue position",
+		value=f"#{queue_position}",
+		inline=True
 	)
 
 	embed.add_field(

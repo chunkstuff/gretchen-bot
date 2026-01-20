@@ -56,8 +56,8 @@ class ConfessionCog(commands.Cog):
 		# Reattach views to existing moderation messages
 		await self.fetch_pending_moderation_messages()
 
-		# Reschedule any pending confessions from the post queue
-		await self.service.reschedule_pending_confessions()
+		# Start the hourly posting task
+		await self.service.start_hourly_posting()
 
 		logger.info("ConfessionCog is ready!")
 
@@ -194,7 +194,7 @@ class ConfessionCog(commands.Cog):
 		"""Cleanup when the cog is unloaded."""
 		logger.info("Unloading ConfessionCog...")
 
-		# Cancel all scheduled posting tasks
-		self.service.cancel_all_tasks()
+		# Stop the hourly posting task
+		self.service.stop_posting()
 
 		logger.info("ConfessionCog unloaded successfully")

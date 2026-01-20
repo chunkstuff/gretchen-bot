@@ -3,13 +3,9 @@ Data models and persistence for confessions.
 """
 import json
 import logging
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-UK_TZ = ZoneInfo("Europe/London")
 
 
 class ConfessionData:
@@ -126,23 +122,3 @@ class ConfessionData:
 		if confession in self.post_queue:
 			self.post_queue.remove(confession)
 			self.save()
-
-	def get_scheduled_dates(self) -> Set:
-		"""
-		Get all dates that already have confessions scheduled.
-
-		Returns:
-			Set: Set of dates (date objects) that have scheduled confessions
-		"""
-		scheduled_dates = set()
-
-		for confession in self.post_queue:
-			if confession["scheduled_time"]:
-				scheduled_dt = datetime.fromisoformat(confession["scheduled_time"])
-				# Convert to UK timezone if timezone-aware, or assume UTC if naive
-				if scheduled_dt.tzinfo is None:
-					scheduled_dt = scheduled_dt.replace(tzinfo=timezone.utc)
-				scheduled_dt_uk = scheduled_dt.astimezone(UK_TZ)
-				scheduled_dates.add(scheduled_dt_uk.date())
-
-		return scheduled_dates

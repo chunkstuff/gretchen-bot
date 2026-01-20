@@ -2,7 +2,8 @@
 Discord UI components for confessions (modals, buttons, views).
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import discord
 from discord.ui import View, Button, Modal, TextInput
@@ -56,7 +57,6 @@ class ConfessionModal(Modal):
 				"status": "submitted",
 				"submission_time": datetime.utcnow().isoformat(),
 				"message_id": None,
-				"scheduled_time": None,  # This will be set upon approval
 			}
 
 			# Add the confession to the submission queue
@@ -131,17 +131,26 @@ class ConfessionNotificationView(View):
 		self.cog.data.remove_submission(confession)
 		confession["status"] = "approved"
 
-		# Schedule for the next available 2am UK time
-		next_2am = self.cog.service.get_next_2am_uk()
-		confession["scheduled_time"] = next_2am.isoformat()
-
+		# Add to post queue
 		self.cog.data.add_to_post_queue(confession)
 
-		# Schedule the confession to be posted at the designated time
-		self.cog.service.schedule_confession_post(confession)
+		# Calculate when this will actually post based on queue position
+		queue_position = len(self.cog.data.post_queue)  # Position in queue (1-indexed)
+		now = datetime.now(timezone.utc)
+		next_run = now.replace(minute=15, second=0, microsecond=0)
 
-		# Format the time nicely for display
-		scheduled_time_str = next_2am.strftime("%Y-%m-%d at %I:%M %p UK time")
+		# If we've passed :15 this hour, start from next hour
+		if now.minute >= 15:
+			next_run = next_run.replace(hour=now.hour + 1)
+
+		# Add hours based on queue position (position 1 = next :15, position 2 = hour after, etc.)
+		hours_to_add = queue_position - 1
+		next_run = next_run.replace(hour=next_run.hour + hours_to_add)
+
+		# Convert to UK time for display
+		uk_tz = ZoneInfo("Europe/London")
+		next_run_uk = next_run.astimezone(uk_tz)
+		posting_time = next_run_uk.strftime("%d %b at %H:%M UK")
 
 		# Update the original embed
 		embed = interaction.message.embeds[0]
@@ -153,7 +162,8 @@ class ConfessionNotificationView(View):
 		approval_embed = create_approval_embed(
 			confession,
 			interaction.user,
-			scheduled_time_str
+			posting_time,
+			queue_position
 		)
 		await interaction.response.send_message(embed=approval_embed)
 

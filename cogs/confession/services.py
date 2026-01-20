@@ -4,7 +4,7 @@ Business logic for confession scheduling and posting.
 import asyncio
 import logging
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Dict
 from .embeds import create_posted_confession_embed
@@ -31,123 +31,60 @@ class ConfessionService:
 		self.data = data_manager
 		self.posting_channel_id = posting_channel_id
 		self.intros = intros
-		self.scheduled_tasks = {}
+		self.posting_task = None
 
-	def get_next_2am_uk(self) -> datetime:
-		"""
-		Get the next available posting time slot (12am, 1am, 2am, or 3am UK).
+	async def start_hourly_posting(self):
+		"""Start the hourly posting task that runs at :15 past each hour."""
+		if self.posting_task and not self.posting_task.done():
+			logger.warning("Hourly posting task already running")
+			return
 
-		Returns:
-			datetime: Next available posting time
-		"""
-		now_uk = datetime.now(UK_TZ)
-		posting_hours = [0, 1, 2, 3]  # 12am, 1am, 2am, 3am
+		self.posting_task = asyncio.create_task(self._hourly_posting_loop())
+		logger.info("Started hourly posting task")
 
-		# Get all currently scheduled times (not just dates)
-		scheduled_times = set()
-		for confession in self.data.post_queue:
-			if confession.get("scheduled_time"):
-				scheduled_dt = datetime.fromisoformat(confession["scheduled_time"])
-				if scheduled_dt.tzinfo is None:
-					scheduled_dt = scheduled_dt.replace(tzinfo=timezone.utc)
-				scheduled_dt_uk = scheduled_dt.astimezone(UK_TZ)
-				scheduled_times.add(scheduled_dt_uk)
+	async def _hourly_posting_loop(self):
+		"""Run posting loop that posts confessions at :15 past each hour."""
+		while True:
+			try:
+				# Calculate next :15 past the hour
+				now = datetime.now(timezone.utc)
+				next_run = now.replace(minute=15, second=0, microsecond=0)
 
-		# Try to find next available slot
-		days_ahead = 0
-		while days_ahead < 365:  # Safety limit
-			for hour in posting_hours:
-				candidate = now_uk.replace(
-					hour=hour,
-					minute=0,
-					second=0,
-					microsecond=0
-				) + timedelta(days=days_ahead)
+				# If we've passed :15 this hour, move to next hour
+				if now.minute >= 15:
+					next_run = next_run.replace(hour=now.hour + 1)
+					# Handle day rollover
+					if next_run.hour == 0 and now.hour == 23:
+						next_run = next_run.replace(day=now.day + 1, hour=0)
 
-				# Skip if this time has already passed today
-				if candidate <= now_uk:
-					continue
-
-				# Check if this slot is available
-				if candidate not in scheduled_times:
-					return candidate
-
-			days_ahead += 1
-
-		# Fallback (should never reach here)
-		return now_uk + timedelta(days=1)
-
-	def schedule_confession_post(self, confession: Dict):
-		"""
-		Schedule a confession to be posted at its designated time.
-
-		Args:
-			confession: The confession dict to schedule
-		"""
-		confession_id = confession["id"]
-
-		# Cancel any existing task for this confession
-		if confession_id in self.scheduled_tasks:
-			self.scheduled_tasks[confession_id].cancel()
-			logger.info(
-				"Cancelled existing task for Confession #%s",
-				confession_id
-			)
-
-		# Create a new task to post the confession at the scheduled time
-		task = asyncio.create_task(self._wait_and_post_confession(confession))
-		self.scheduled_tasks[confession_id] = task
-		logger.info(
-			"Scheduled Confession #%s for %s",
-			confession_id,
-			confession['scheduled_time']
-		)
-
-	async def _wait_and_post_confession(self, confession: Dict):
-		"""
-		Wait until the scheduled time and then post the confession.
-
-		Args:
-			confession: The confession dict to post
-		"""
-		try:
-			scheduled_time = datetime.fromisoformat(confession["scheduled_time"])
-			now = datetime.now(timezone.utc)
-
-			# Calculate how long to wait
-			wait_seconds = (scheduled_time - now).total_seconds()
-
-			if wait_seconds > 0:
+				wait_seconds = (next_run - now).total_seconds()
 				logger.info(
-					"Waiting %.0f seconds (%.1f hours) to post Confession #%s",
-					wait_seconds,
-					wait_seconds/3600,
-					confession['id']
+					"Next confession post at %s (in %.0f seconds)",
+					next_run.strftime("%Y-%m-%d %H:%M UTC"),
+					wait_seconds
 				)
+
+				# Wait until :15 past the hour
 				await asyncio.sleep(wait_seconds)
-			else:
-				logger.warning(
-					"Confession #%s is overdue by %.0f seconds. Posting immediately.",
-					confession['id'],
-					abs(wait_seconds)
+
+				# Post next confession if queue has items
+				if self.data.post_queue:
+					confession = self.data.post_queue[0]
+					await self.post_confession(confession)
+				else:
+					logger.info("No confessions in queue to post")
+
+			except asyncio.CancelledError:
+				logger.info("Hourly posting task cancelled")
+				raise
+			except Exception as e:
+				logger.error(
+					"Error in hourly posting loop: %s",
+					e,
+					exc_info=True
 				)
-
-			# Post the confession
-			await self.post_confession(confession)
-
-		except asyncio.CancelledError:
-			logger.info(
-				"Scheduled task for Confession #%s was cancelled",
-				confession['id']
-			)
-			raise
-		except Exception as e:
-			logger.error(
-				"Error in _wait_and_post_confession for Confession #%s: %s",
-				confession['id'],
-				e,
-				exc_info=True
-			)
+				# Wait a bit before retrying to avoid spam
+				await asyncio.sleep(60)
 
 	async def post_confession(self, confession: Dict):
 		"""
@@ -176,10 +113,6 @@ class ConfessionService:
 			self.data.archive(confession)
 			self.data.remove_from_post_queue(confession)
 
-			# Remove from scheduled tasks
-			if confession['id'] in self.scheduled_tasks:
-				del self.scheduled_tasks[confession['id']]
-
 		except Exception as e:
 			logger.error(
 				"Failed to post confession #%s: %s",
@@ -188,52 +121,8 @@ class ConfessionService:
 				exc_info=True
 			)
 
-	async def reschedule_pending_confessions(self):
-		"""Reschedule all confessions in the post queue on bot startup."""
-		now = datetime.now(timezone.utc)
-		overdue_count = 0
-		scheduled_count = 0
-
-		logger.info(
-			"Rescheduling %s pending confessions from post queue",
-			len(self.data.post_queue)
-		)
-
-		# Create a copy to iterate safely
-		for confession in self.data.post_queue[:]:
-			if not confession.get("scheduled_time"):
-				logger.warning(
-					"Confession #%s has no scheduled_time. Skipping.",
-					confession['id']
-				)
-				continue
-
-			scheduled_time = datetime.fromisoformat(confession["scheduled_time"])
-
-			# If the scheduled time has already passed, post immediately
-			if scheduled_time <= now:
-				overdue_count += 1
-				logger.info(
-					"Confession #%s is overdue (scheduled for %s). Posting immediately.",
-					confession['id'],
-					confession['scheduled_time']
-				)
-				await self.post_confession(confession)
-			else:
-				# Schedule the confession for its designated time
-				scheduled_count += 1
-				self.schedule_confession_post(confession)
-
-		logger.info(
-			"Rescheduling complete: %s scheduled, %s posted immediately",
-			scheduled_count,
-			overdue_count
-		)
-
-	def cancel_all_tasks(self):
-		"""Cancel all scheduled posting tasks."""
-		for confession_id, task in self.scheduled_tasks.items():
-			task.cancel()
-			logger.debug("Cancelled task for Confession #%s", confession_id)
-		self.scheduled_tasks.clear()
-		logger.info("All scheduled confession tasks cancelled")
+	def stop_posting(self):
+		"""Stop the hourly posting task."""
+		if self.posting_task and not self.posting_task.done():
+			self.posting_task.cancel()
+			logger.info("Stopped hourly posting task")
