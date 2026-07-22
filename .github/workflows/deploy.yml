@@ -31,18 +31,24 @@ jobs:
           ProxyCommand cloudflared access ssh --hostname %h
         EOF
 
+    # Ship the commit this run checked out, rather than having the Pi clone
+    # main's tip. Avoids deploying a newer commit than the one under test,
+    # and means the Pi needs no GitHub credentials of its own.
+    - name: Upload code to Pi
+      run: |
+        rsync -az --delete \
+          -e "ssh -o StrictHostKeyChecking=no" \
+          --exclude='.git' \
+          --exclude='__pycache__' \
+          --exclude='*.pyc' \
+          ./ pilab:/tmp/gretchen-deploy/
+
     - name: Deploy to Pi
       run: |
         ssh -o StrictHostKeyChecking=no pilab << 'ENDSSH'
           echo "🚀 Starting deployment of Gretchen..."
 
-          DEPLOY_DIR="/tmp/gretchen-deploy-$(date +%s)"
-          mkdir -p $DEPLOY_DIR
-          sudo chown pluribus:pluribus $DEPLOY_DIR
-          cd $DEPLOY_DIR
-
-          echo "📥 Cloning repository..."
-          sudo -u pluribus bash -c "cd $DEPLOY_DIR && GIT_SSH_COMMAND='ssh -i /home/pluribus/.ssh/github_deploy -o StrictHostKeyChecking=no' git clone git@github.com:${{ github.repository }}.git ."
+          DEPLOY_DIR="/tmp/gretchen-deploy"
           sudo mkdir -p /home/pluribus/plures/gretchen
 
           echo "🛑 Stopping bot..."
