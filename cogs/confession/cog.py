@@ -4,6 +4,7 @@ Main confession cog - coordinates between data, services, and views.
 import logging
 import asyncio
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from config import (
@@ -60,6 +61,48 @@ class ConfessionCog(commands.Cog):
 		await self.service.start_hourly_posting()
 
 		logger.info("ConfessionCog is ready!")
+
+	@app_commands.command(
+		name="postnow",
+		description="Post the next queued confession right now."
+	)
+	@app_commands.default_permissions(manage_messages=True)
+	async def postnow(self, interaction: discord.Interaction):
+		"""
+		Post the head of the post queue immediately, skipping the hourly wait.
+
+		Args:
+			interaction: The Discord interaction from the slash command
+		"""
+		if not self.data.post_queue:
+			await interaction.response.send_message(
+				"There's, like, nothing in the queue right now, babe. 💅",
+				ephemeral=True
+			)
+			return
+
+		confession = self.data.post_queue[0]
+		await interaction.response.defer(ephemeral=True)
+		await self.service.post_confession(confession)
+
+		# post_confession only drops it from the queue on success
+		if confession in self.data.post_queue:
+			await interaction.followup.send(
+				f"Ugh, Confession #{confession['id']} wouldn't post. "
+				"Check the logs, hon. 💔",
+				ephemeral=True
+			)
+		else:
+			await interaction.followup.send(
+				f"Spilled Confession #{confession['id']}! 💋✨",
+				ephemeral=True
+			)
+			logger.info(
+				"Confession #%s posted manually by %s (%s)",
+				confession['id'],
+				interaction.user,
+				interaction.user.id
+			)
 
 	@commands.Cog.listener()
 	async def on_interaction(self, interaction: discord.Interaction):
