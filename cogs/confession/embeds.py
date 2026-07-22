@@ -2,10 +2,7 @@
 Embed builders for confession notifications.
 """
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 import discord
-
-UK_TZ = ZoneInfo("Europe/London")
 
 
 # Color constants
@@ -18,22 +15,39 @@ class EmbedColors:
 	PINK = 0xFFC0CB     # Gretchen pink
 
 
-def format_timestamp(iso_timestamp):
+def parse_utc(iso_timestamp):
 	"""
-	Format an ISO timestamp string into a human-readable format.
+	Parse a stored ISO timestamp into a timezone-aware UTC datetime.
+
+	Timestamps written before 2026-07 are naive but always UTC, so a missing
+	offset is read as UTC rather than as the host's local time.
 
 	Args:
-		iso_timestamp: ISO format timestamp string (e.g., "2026-01-18T00:40:23.574855")
+		iso_timestamp: ISO format timestamp string
 
 	Returns:
-		str: Formatted string (e.g., "18 Jan 2026 at 00:40 UTC")
+		datetime: Timezone-aware datetime in UTC
 	"""
-	try:
-		dt = datetime.fromisoformat(iso_timestamp)
-		return dt.strftime("%d %b %Y at %H:%M UTC")
-	except (ValueError, TypeError):
-		# If parsing fails, return the original string
-		return iso_timestamp
+	dt = datetime.fromisoformat(iso_timestamp)
+	if dt.tzinfo is None:
+		dt = dt.replace(tzinfo=timezone.utc)
+	return dt.astimezone(timezone.utc)
+
+
+def discord_time(value, style="f"):
+	"""
+	Render a timestamp as Discord markdown, shown in each viewer's own timezone.
+
+	Args:
+		value: Timezone-aware datetime or stored ISO timestamp string
+		style: Discord timestamp style (f=long date/time, R=relative, t=time)
+
+	Returns:
+		str: Markdown such as "<t:1753173481:f>"
+	"""
+	if isinstance(value, str):
+		value = parse_utc(value)
+	return f"<t:{int(value.timestamp())}:{style}>"
 
 
 def _create_base_moderation_embed(title, description, color, confession):
@@ -54,7 +68,7 @@ def _create_base_moderation_embed(title, description, color, confession):
 		description=description.format(id=confession['id']),
 		color=color
 	)
-	embed.timestamp = datetime.utcnow()
+	embed.timestamp = datetime.now(timezone.utc)
 	return embed
 
 
@@ -196,12 +210,7 @@ def create_submission_embed(confession):
 		color=EmbedColors.WARNING,
 	)
 
-	# Convert submission time to UK time for display
-	submission_dt = datetime.fromisoformat(confession['submission_time'])
-	if submission_dt.tzinfo is None:
-		submission_dt = submission_dt.replace(tzinfo=timezone.utc)
-	submission_dt_uk = submission_dt.astimezone(UK_TZ)
-	formatted_time = submission_dt_uk.strftime("%d %b %Y at %H:%M UK")
+	formatted_time = discord_time(confession['submission_time'])
 
 	embed.add_field(
 		name="📝 Submitted by",
@@ -233,7 +242,7 @@ def create_posted_confession_embed(confession, intro_message):
 		title=f"Confession #{confession['id']}",
 		description=f"{intro_message}\n```\n{confession['text']}\n```",
 		color=EmbedColors.PINK,
-		timestamp=datetime.fromisoformat(confession["submission_time"]),
+		timestamp=parse_utc(confession["submission_time"]),
 	)
 	embed.add_field(name="", value="🤫🤭")
 	embed.set_footer(text="Anonymously Submitted")

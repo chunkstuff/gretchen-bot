@@ -5,6 +5,7 @@ Run: python test_scheduling.py
 """
 from datetime import datetime, timedelta, timezone
 
+from cogs.confession.embeds import discord_time, parse_utc
 from cogs.confession.services import next_post_time
 
 
@@ -58,8 +59,30 @@ def test_queue_offset():
 		assert got == expected, f"position {position}: got {got}, want {expected}"
 
 
+def test_parse_utc():
+	"""Stored timestamps read as UTC whether or not they carry an offset."""
+	naive = parse_utc("2026-07-22T08:38:01.013429")          # legacy rows
+	aware = parse_utc("2026-07-22T08:38:01.013429+00:00")    # written since 2026-07
+	assert naive == aware, f"{naive} != {aware}"
+	assert naive.tzinfo is not None and naive.hour == 8
+
+
+def test_discord_time():
+	"""Embeds emit Discord markdown so each viewer sees their own timezone."""
+	# 2026-07-22T08:38:00Z is epoch 1784709480
+	assert discord_time("2026-07-22T08:38:00+00:00") == "<t:1784709480:f>"
+	# A legacy naive row is UTC, so it renders identically to its aware form
+	assert discord_time("2026-07-22T08:38:00") == "<t:1784709480:f>"
+	assert discord_time(_utc(2026, 7, 22, 8, 38), "R") == "<t:1784709480:R>"
+	# No hardcoded zone leaks into the output
+	for style in ("f", "R", "t"):
+		assert "UK" not in discord_time(_utc(2026, 7, 22, 8, 38), style)
+
+
 if __name__ == "__main__":
 	test_cases()
 	test_every_minute_of_a_year()
 	test_queue_offset()
-	print(f"ok: {len(CASES)} cases + full-year sweep + queue offsets")
+	test_parse_utc()
+	test_discord_time()
+	print(f"ok: {len(CASES)} cases + full-year sweep + queue/tz checks")

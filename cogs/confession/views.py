@@ -3,7 +3,6 @@ Discord UI components for confessions (modals, buttons, views).
 """
 import logging
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 import discord
 from discord.ui import View, Button, Modal, TextInput
@@ -11,7 +10,8 @@ from discord.ui import View, Button, Modal, TextInput
 from .embeds import (
 	create_approval_embed,
 	create_rejection_embed,
-	create_submission_embed
+	create_submission_embed,
+	discord_time
 )
 from .services import next_post_time
 
@@ -56,7 +56,7 @@ class ConfessionModal(Modal):
 				"username": interaction.user.display_name,
 				"text": full_text,
 				"status": "submitted",
-				"submission_time": datetime.utcnow().isoformat(),
+				"submission_time": datetime.now(timezone.utc).isoformat(),
 				"message_id": None,
 			}
 
@@ -142,10 +142,7 @@ class ConfessionNotificationView(View):
 		next_run = next_post_time(datetime.now(timezone.utc))
 		next_run += timedelta(hours=queue_position - 1)
 
-		# Convert to UK time for display
-		uk_tz = ZoneInfo("Europe/London")
-		next_run_uk = next_run.astimezone(uk_tz)
-		posting_time = next_run_uk.strftime("%d %b at %H:%M UK")
+		posting_time = f"{discord_time(next_run)} ({discord_time(next_run, 'R')})"
 
 		# Update the original embed
 		embed = interaction.message.embeds[0]
