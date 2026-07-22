@@ -4,14 +4,30 @@ Business logic for confession scheduling and posting.
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 from typing import Dict
 from .embeds import create_posted_confession_embed
 
 logger = logging.getLogger(__name__)
 
-UK_TZ = ZoneInfo("Europe/London")
+
+def next_post_time(now: datetime) -> datetime:
+	"""
+	Return the next :15-past-the-hour after `now`.
+
+	timedelta carries hour/day/month/year rollover, so month lengths,
+	leap years and new year need no special cases.
+
+	Args:
+		now: The current time
+
+	Returns:
+		datetime: The next posting time, strictly after `now`
+	"""
+	next_run = now.replace(minute=15, second=0, microsecond=0)
+	if now.minute >= 15:
+		next_run += timedelta(hours=1)
+	return next_run
 
 
 class ConfessionService:
@@ -48,14 +64,7 @@ class ConfessionService:
 			try:
 				# Calculate next :15 past the hour
 				now = datetime.now(timezone.utc)
-				next_run = now.replace(minute=15, second=0, microsecond=0)
-
-				# If we've passed :15 this hour, move to next hour
-				if now.minute >= 15:
-					next_run = next_run.replace(hour=now.hour + 1)
-					# Handle day rollover
-					if next_run.hour == 0 and now.hour == 23:
-						next_run = next_run.replace(day=now.day + 1, hour=0)
+				next_run = next_post_time(now)
 
 				wait_seconds = (next_run - now).total_seconds()
 				logger.info(

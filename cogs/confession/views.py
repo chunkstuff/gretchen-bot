@@ -2,7 +2,7 @@
 Discord UI components for confessions (modals, buttons, views).
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import discord
@@ -13,6 +13,7 @@ from .embeds import (
 	create_rejection_embed,
 	create_submission_embed
 )
+from .services import next_post_time
 
 logger = logging.getLogger(__name__)
 
@@ -136,16 +137,10 @@ class ConfessionNotificationView(View):
 
 		# Calculate when this will actually post based on queue position
 		queue_position = len(self.cog.data.post_queue)  # Position in queue (1-indexed)
-		now = datetime.now(timezone.utc)
-		next_run = now.replace(minute=15, second=0, microsecond=0)
 
-		# If we've passed :15 this hour, start from next hour
-		if now.minute >= 15:
-			next_run = next_run.replace(hour=now.hour + 1)
-
-		# Add hours based on queue position (position 1 = next :15, position 2 = hour after, etc.)
-		hours_to_add = queue_position - 1
-		next_run = next_run.replace(hour=next_run.hour + hours_to_add)
+		# Position 1 posts at the next :15, position 2 the hour after, etc.
+		next_run = next_post_time(datetime.now(timezone.utc))
+		next_run += timedelta(hours=queue_position - 1)
 
 		# Convert to UK time for display
 		uk_tz = ZoneInfo("Europe/London")
